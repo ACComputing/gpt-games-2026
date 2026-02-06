@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>B3313 - Personalization Build</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #000;
+            font-family: 'Courier New', Courier, monospace;
+            user-select: none;
+        }
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 2;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        #debug-text {
+            color: lime;
+            text-shadow: 0 0 5px lime;
+            font-size: 14px;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 10px;
+            max-width: 300px;
+        }
+        #center-message {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-size: 24px;
+            text-align: center;
+            opacity: 0;
+            transition: opacity 1s;
+        }
+        #start-screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: #000;
+            color: white;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 10;
+            cursor: pointer;
+        }
+        h1 { margin-bottom: 10px; color: red; text-transform: uppercase; letter-spacing: 5px; }
+        p { color: #aaa; }
+        .glitch { animation: glitch 1s linear infinite; }
+        @keyframes glitch {
+            2%, 64% { transform: translate(2px,0) skew(0deg); }
+            4%, 60% { transform: translate(-2px,0) skew(0deg); }
+            62% { transform: translate(0,0) skew(5deg); }
+        }
+        #personalization-id { color: blue; }
+    </style>
+</head>
+<body>
+
+    <div id="start-screen">
+        <h1 class="glitch">B3313</h1>
+        <p>INTERNAL PLEXUS BUILD 1.0</p>
+        <p>PERSONALIZATION A.I. ENABLED</p>
+        <br>
+        <p>[ CLICK TO INITIALIZE ]</p>
+        <p style="font-size: 10px; margin-top: 50px;">WASD to Move | Mouse to Look</p>
+    </div>
+
+    <div id="ui-layer">
+        <div id="debug-text">
+            SYSTEM: BOOT<br>
+            ZONE: CASTLE GROUNDS<br>
+            AI: CALIBRATING...<br>
+            P-VALUE: <span id="personalization-id">---</span>
+        </div>
+        <div id="center-message"></div>
+    </div>
+
+    <div id="canvas-container"></div>
+
+    <!-- Import Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        // --- CONFIG & STATE ---
+        const config = {
+            speed: 0.25,
+            sprintSpeed: 0.5,
+            mouseSensitivity: 0.002,
+            height: 2,
+            personalizationLevel: 0
+        };
+
+        let camera, scene, renderer;
+        let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false;
+        let velocity = new THREE.Vector3();
+        let direction = new THREE.Vector3();
+        let frameCount = 0;
+        let isSprint = false;
+        
+        // Game Objects
+        const collidables = [];
+        let mipsObj = null;
+        let holeObj = null;
+        let waterMesh = null;
+        let sunRugMesh = null;
+
+        // --- INIT ---
+        const startScreen = document.getElementById('start-screen');
+        const debugText = document.getElementById('debug-text');
+        const pIdSpan = document.getElementById('personalization-id');
+        const centerMsg = document.getElementById('center-message');
+
+        startScreen.addEventListener('click', () => {
+            startScreen.style.display = 'none';
+            init();
+            animate();
+            document.body.requestPointerLock();
+        });
+
+        function init() {
+            // Scene Setup
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87CEEB); // Sky Blue
+            scene.fog = new THREE.Fog(0x87CEEB, 0, 80);
+
+            // Camera
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, config.height, -40); // Start on bridge
+            camera.rotation.y = Math.PI; // Face castle
+
+            // Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: false });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(1); 
+            document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+            
+            const sunLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            sunLight.position.set(50, 100, 50);
+            scene.add(sunLight);
+
+            // --- BUILD WORLD ---
+            buildWorld();
+
+            // Controls
+            document.addEventListener('keydown', onKeyDown);
+            document.addEventListener('keyup', onKeyUp);
+            document.addEventListener('mousemove', onMouseMove);
+            window.addEventListener('resize', onWindowResize);
+
+            // AI Loop
+            setInterval(updatePersonalizationAI, 2000);
+        }
+
+        // --- ASSET GENERATION ---
+        function createColorTexture(color, size=64) {
+            const canvas = document.createElement('canvas');
+            canvas.width = size;
+            canvas.height = size;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = color;
+            ctx.fillRect(0,0,size,size);
+            // Add noise
+            for(let i=0; i<50; i++) {
+                ctx.fillStyle = `rgba(0,0,0,0.1)`;
+                ctx.fillRect(Math.random()*size, Math.random()*size, 4, 4);
+            }
+            const tex = new THREE.CanvasTexture(canvas);
+            tex.magFilter = THREE.NearestFilter;
+            return tex;
+        }
+
+        function createSunTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 128;
+            canvas.height = 128;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#654321'; // Floor wood
+            ctx.fillRect(0,0,128,128);
+            
+            // Sun
+            ctx.fillStyle = '#FFD700';
+            ctx.beginPath();
+            ctx.arc(64, 64, 40, 0, Math.PI*2);
+            ctx.fill();
+            
+            // Rays
+            ctx.strokeStyle = '#FFD700';
+            ctx.lineWidth = 5;
+            for(let i=0; i<8; i++) {
+                ctx.beginPath();
+                ctx.moveTo(64,64);
+                const angle = (i / 8) * Math.PI * 2;
+                ctx.lineTo(64 + Math.cos(angle)*60, 64 + Math.sin(angle)*60);
+                ctx.stroke();
+            }
+
+            const tex = new THREE.CanvasTexture(canvas);
+            tex.magFilter = THREE.NearestFilter;
+            return tex;
+        }
+
+        // Materials
+        const grassMat = new THREE.MeshStandardMaterial({ map: createColorTexture('#228B22'), roughness: 1 });
+        const waterMat = new THREE.MeshBasicMaterial({ color: 0x0000FF, transparent: true, opacity: 0.7 });
+        const wallMat = new THREE.MeshStandardMaterial({ map: createColorTexture('#E0E0E0'), roughness: 0.5 }); // White castle walls
+        const roofMat = new THREE.MeshStandardMaterial({ map: createColorTexture('#8B0000'), roughness: 0.5 }); // Red roof
+        const bridgeMat = new THREE.MeshStandardMaterial({ map: createColorTexture('#A0522D'), roughness: 0.8 }); // Brown path
+        const carpetMat = new THREE.MeshStandardMaterial({ map: createColorTexture('#FF0000'), roughness: 1 });
+        const sunRugMat = new THREE.MeshStandardMaterial({ map: createSunTexture(), roughness: 0.8 });
+        const woodMat = new THREE.MeshStandardMaterial({ map: createColorTexture('#654321'), roughness: 0.8 });
+        const blackHoleMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
+
+        function buildWorld() {
+            // 1. COURTYARD
+            
+            // Grass Base
+            const grassGeo = new THREE.PlaneGeometry(200, 200);
+            const grass = new THREE.Mesh(grassGeo, grassMat);
+            grass.rotation.x = -Math.PI / 2;
+            grass.position.y = -2; // Lower than bridge
+            scene.add(grass);
+
+            // Water (Moat)
+            const waterGeo = new THREE.PlaneGeometry(200, 200);
+            waterMesh = new THREE.Mesh(waterGeo, waterMat);
+            waterMesh.rotation.x = -Math.PI / 2;
+            waterMesh.position.y = -1;
+            scene.add(waterMesh);
+
+            // Bridge
+            const bridgeGeo = new THREE.BoxGeometry(10, 1, 60);
+            const bridge = new THREE.Mesh(bridgeGeo, bridgeMat);
+            bridge.position.set(0, -0.5, -30);
+            scene.add(bridge);
+            collidables.push(bridge);
+
+            // Fountain (Empty/Dried up)
+            const fBaseGeo = new THREE.CylinderGeometry(8, 8, 2, 16);
+            const fBase = new THREE.Mesh(fBaseGeo, wallMat);
+            fBase.position.set(0, -1, -45);
+            scene.add(fBase);
+            collidables.push(fBase);
+            
+            const fCenterGeo = new THREE.CylinderGeometry(1, 1, 6, 8);
+            const fCenter = new THREE.Mesh(fCenterGeo, wallMat);
+            fCenter.position.set(0, 1, -45);
+            scene.add(fCenter);
+            collidables.push(fCenter);
+
+            // 2. CASTLE EXTERIOR
+            
+            // Main Block
+            const mainBlockGeo = new THREE.BoxGeometry(40, 30, 40);
+            const mainBlock = new THREE.Mesh(mainBlockGeo, wallMat); // Visual only, we collide with inner walls
+            mainBlock.position.set(0, 15, 20);
+            // We don't add this to collidables because we want to walk "inside" it conceptually
+            // Instead we build walls around the lobby.
+            
+            // Front Facade
+            createWall(0, 15, 0, 40, 30, 2); // Front Face
+
+            // Towers
+            const towerGeo = new THREE.CylinderGeometry(5, 5, 40, 16);
+            const tower1 = new THREE.Mesh(towerGeo, wallMat);
+            tower1.position.set(-20, 20, 0);
+            scene.add(tower1);
+            
+            const tower2 = new THREE.Mesh(towerGeo, wallMat);
+            tower2.position.set(20, 20, 0);
+            scene.add(tower2);
+
+            // Roofs
+            const coneGeo = new THREE.ConeGeometry(7, 10, 16);
+            const roof1 = new THREE.Mesh(coneGeo, roofMat);
+            roof1.position.set(-20, 45, 0);
+            scene.add(roof1);
+            const roof2 = new THREE.Mesh(coneGeo, roofMat);
+            roof2.position.set(20, 45, 0);
+            scene.add(roof2);
+
+            // Central Spire
+            const mainSpireGeo = new THREE.ConeGeometry(15, 20, 4); // 4 sides pyramid
+            const mainSpire = new THREE.Mesh(mainSpireGeo, roofMat);
+            mainSpire.position.set(0, 45, 20);
+            mainSpire.rotation.y = Math.PI/4;
+            scene.add(mainSpire);
+
+
+            // 3. CASTLE INTERIOR (Lobby)
+            
+            // Floor (Sun Rug)
+            const lobbyFloorGeo = new THREE.PlaneGeometry(38, 38);
+            sunRugMesh = new THREE.Mesh(lobbyFloorGeo, sunRugMat);
+            sunRugMesh.rotation.x = -Math.PI / 2;
+            sunRugMesh.position.set(0, 0.1, 20);
+            scene.add(sunRugMesh);
+
+            // Lobby Walls
+            createWall(-20, 15, 20, 2, 30, 40); // Left
+            createWall(20, 15, 20, 2, 30, 40);  // Right
+            createWall(0, 15, 40, 40, 30, 2);   // Back
+
+            // Mezzanine / 2nd Floor
+            const mezzGeo = new THREE.BoxGeometry(40, 1, 15);
+            const mezz = new THREE.Mesh(mezzGeo, woodMat);
+            mezz.position.set(0, 10, 32);
+            scene.add(mezz);
+            // collidables.push(mezz); // Collision handled loosely by height
+
+            // Stairs
+            createStairs(0, 0, 20);
+
+            // Doors
+            createDoor(0, 0, 0); // Front Door
+            createDoor(-15, 0, 40); // Back Left Door (Star Door 1)
+            createDoor(15, 0, 40); // Back Right Door (Star Door 3)
+            createDoor(0, 10, 40); // Top Center Door
+
+            // 4. MIPS & THE HOLE
+            
+            // MIPS Character
+            createMips(5, 25);
+
+            // The Hole (Glitch Spot)
+            createGlitchHole(-10, 25);
+        }
+
+        function createWall(x, y, z, w, h, d) {
+            const geo = new THREE.BoxGeometry(w, h, d);
+            const mesh = new THREE.Mesh(geo, wallMat);
+            mesh.position.set(x, y, z);
+            scene.add(mesh);
+            collidables.push(mesh);
+            return mesh;
+        }
+
+        function createDoor(x, y, z) {
+            const geo = new THREE.BoxGeometry(4, 6, 1);
+            const mesh = new THREE.Mesh(geo, roofMat); // Red doors
+            mesh.position.set(x, y+3, z);
+            scene.add(mesh);
+        }
+
+        function createStairs(x, y, z) {
+            // Main center ramp stair block
+            const stairGeo = new THREE.BoxGeometry(8, 10, 12);
+            const stair = new THREE.Mesh(stairGeo, carpetMat);
+            stair.rotation.x = -Math.PI / 4; // Slanted
+            stair.position.set(0, 4, 30);
+            scene.add(stair);
+            collidables.push(stair);
+        }
+
+        function createMips(x, z) {
+            const mipsGeo = new THREE.ConeGeometry(0.5, 1.5, 8);
+            const mipsMat = new THREE.MeshLambertMaterial({ color: 0xffff00 });
+            mipsObj = new THREE.Mesh(mipsGeo, mipsMat);
+            mipsObj.position.set(x, 1, z);
+            scene.add(mipsObj);
+            
+            // Mips Ears
+            const earGeo = new THREE.BoxGeometry(0.2, 0.8, 0.1);
+            const ear1 = new THREE.Mesh(earGeo, mipsMat);
+            ear1.position.set(0.2, 0.5, 0);
+            ear1.rotation.z = -0.3;
+            mipsObj.add(ear1);
+            
+            const ear2 = new THREE.Mesh(earGeo, mipsMat);
+            ear2.position.set(-0.2, 0.5, 0);
+            ear2.rotation.z = 0.3;
+            mipsObj.add(ear2);
+        }
+
+        function createGlitchHole(x, z) {
+            const holeGeo = new THREE.CircleGeometry(2, 32);
+            holeObj = new THREE.Mesh(holeGeo, blackHoleMat);
+            holeObj.rotation.x = -Math.PI / 2;
+            holeObj.position.set(x, 0.15, z);
+            scene.add(holeObj);
+        }
+
+        // --- PERSONALIZATION AI ---
+        function updatePersonalizationAI() {
+            const seed = Math.floor(Math.random() * 0xFFFFFF).toString(16).toUpperCase();
+            pIdSpan.innerText = seed;
+
+            const rand = Math.random();
+
+            if (rand > 0.95) {
+                // Blood Water event
+                waterMesh.material.color.setHex(0x8B0000);
+                debugText.innerHTML += "<br>> FLUID DATA CORRUPTION";
+            } else if (rand < 0.05) {
+                 // Reset Water
+                 waterMesh.material.color.setHex(0x0000FF);
+            }
+
+            if (rand > 0.97) {
+                // Sky Glitch
+                scene.background.setHex(0x000000);
+                setTimeout(() => scene.background.setHex(0x87CEEB), 200);
+            }
+
+            // MIPS Movement logic
+            if (mipsObj) {
+                mipsObj.lookAt(camera.position.x, mipsObj.position.y, camera.position.z);
+                
+                // Hop logic
+                mipsObj.position.y = 1 + Math.abs(Math.sin(Date.now() * 0.005));
+                
+                // Teleport if too close (He runs away)
+                if (camera.position.distanceTo(mipsObj.position) < 5) {
+                    mipsObj.position.x = (Math.random() - 0.5) * 30;
+                    mipsObj.position.z = 20 + (Math.random() * 10);
+                }
+            }
+        }
+
+        // --- INPUT HANDLING ---
+        function onKeyDown(event) {
+            switch (event.code) {
+                case 'ArrowUp':
+                case 'KeyW': moveForward = true; break;
+                case 'ArrowLeft':
+                case 'KeyA': moveLeft = true; break;
+                case 'ArrowDown':
+                case 'KeyS': moveBackward = true; break;
+                case 'ArrowRight':
+                case 'KeyD': moveRight = true; break;
+                case 'ShiftLeft': isSprint = true; break;
+            }
+        }
+
+        function onKeyUp(event) {
+            switch (event.code) {
+                case 'ArrowUp':
+                case 'KeyW': moveForward = false; break;
+                case 'ArrowLeft':
+                case 'KeyA': moveLeft = false; break;
+                case 'ArrowDown':
+                case 'KeyS': moveBackward = false; break;
+                case 'ArrowRight':
+                case 'KeyD': moveRight = false; break;
+                case 'ShiftLeft': isSprint = false; break;
+            }
+        }
+
+        function onMouseMove(event) {
+            if (document.pointerLockElement === document.body) {
+                camera.rotation.y -= event.movementX * config.mouseSensitivity;
+            }
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // --- PHYSICS & COLLISION ---
+        function checkCollisions(newPos) {
+            // Player bounding box
+            const playerBox = new THREE.Box3();
+            const size = new THREE.Vector3(1, 2, 1);
+            playerBox.setFromCenterAndSize(newPos, size);
+
+            for (let obj of collidables) {
+                const box = new THREE.Box3().setFromObject(obj);
+                if (playerBox.intersectsBox(box)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        function checkEvents() {
+            // Hole Logic
+            if (holeObj && camera.position.distanceTo(holeObj.position) < 2) {
+                // FALL INTO VOID
+                camera.position.y -= 0.5;
+                scene.background.setHex(0x000000);
+                scene.fog.color.setHex(0x000000);
+                showMessage("NEGATIVE EMOTIONAL AURA");
+                
+                if (camera.position.y < -20) {
+                    // Respawn on bridge
+                    camera.position.set(0, config.height, -40);
+                    scene.background.setHex(0x87CEEB);
+                    scene.fog.color.setHex(0x87CEEB);
+                }
+            } else {
+                // Gravity / Floor Check
+                // Very basic height map logic
+                let floorHeight = 0;
+                
+                // If on bridge (approx z < -10 and |x| < 5)
+                if (camera.position.z < -2 && Math.abs(camera.position.x) < 6) {
+                    floorHeight = 0.5; // Bridge height
+                } else if (camera.position.z > 0 && Math.abs(camera.position.x) < 19) {
+                     floorHeight = 0.1; // Lobby Floor
+                } else {
+                    floorHeight = -2; // Grass
+                }
+                
+                // Stair climbing approximation
+                if (camera.position.z > 25 && camera.position.z < 35 && Math.abs(camera.position.x) < 5) {
+                    floorHeight = 0.1 + (camera.position.z - 25) * 0.8;
+                }
+                
+                // Mezzanine
+                if (camera.position.y > 5 && camera.position.z > 30) {
+                   // Keep them up there
+                   if (camera.position.y < 10 + config.height) {
+                       // falling logic handled below, but floor is 10
+                       floorHeight = 10;
+                   }
+                }
+
+                if (camera.position.y > floorHeight + config.height) {
+                    camera.position.y -= 0.2; // Gravity
+                } else if (camera.position.y < floorHeight + config.height) {
+                    camera.position.y = floorHeight + config.height; // Snap to floor
+                }
+            }
+        }
+
+        function showMessage(text) {
+            centerMsg.innerText = text;
+            centerMsg.style.opacity = 1;
+            setTimeout(() => {
+                centerMsg.style.opacity = 0;
+            }, 3000);
+        }
+
+        // --- GAME LOOP ---
+        function animate() {
+            requestAnimationFrame(animate);
+
+            if (document.pointerLockElement === document.body) {
+                const delta = isSprint ? config.sprintSpeed : config.speed;
+
+                velocity.x = 0;
+                velocity.z = 0;
+
+                direction.z = Number(moveForward) - Number(moveBackward);
+                direction.x = Number(moveRight) - Number(moveLeft);
+                direction.normalize(); 
+
+                if (moveForward || moveBackward) velocity.z -= direction.z * delta;
+                if (moveLeft || moveRight) velocity.x -= direction.x * delta;
+
+                const nextX = camera.position.x - Math.sin(camera.rotation.y) * velocity.z - Math.cos(camera.rotation.y) * velocity.x;
+                const nextZ = camera.position.z - Math.cos(camera.rotation.y) * velocity.z + Math.sin(camera.rotation.y) * velocity.x;
+
+                const nextPos = new THREE.Vector3(nextX, camera.position.y, nextZ);
+
+                if (!checkCollisions(nextPos)) {
+                    camera.position.x = nextX;
+                    camera.position.z = nextZ;
+                }
+            }
+            
+            checkEvents();
+            renderer.render(scene, camera);
+            frameCount++;
+        }
+
+    </script>
+</body>
+</html>
